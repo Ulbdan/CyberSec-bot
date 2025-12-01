@@ -1,0 +1,399 @@
+1. What is cybersecurity?
+
+Cybersecurity means protecting computers, phones, and data from hackers, viruses, and scams.
+
+ 2. Why is cybersecurity important?
+
+Because it keeps your personal information safe and stops criminals from stealing or damaging it.
+
+ 3. What is a cyberattack?
+
+A cyberattack is when someone tries to break into your system or steal your data.
+
+ 4. What is phishing?
+
+Phishing is when attackers send fake emails or messages to trick you into giving personal information.
+
+ 5. How can I identify a phishing email?
+
+Look for spelling mistakes, suspicious links, strange senders, or urgent messages asking you to click.
+
+ 6. What should I do if I clicked a phishing link?
+
+Report it immediately, change your password, and inform your IT/security team.
+
+ 7. What is smishing?
+
+Smishing is phishing through SMS/text messages.
+
+ 8. What is vishing?
+
+Vishing is phishing done by voice calls where scammers try to trick you.
+
+ 9. What is malware?
+
+Malware is harmful software that can steal or delete your data.
+
+ 10. What is a virus?
+
+A virus is a type of malware that spreads from one device to another.
+
+ 11. What is ransomware?
+
+Ransomware locks your files and asks you to pay money to get them back.
+
+ 12. What is spyware?
+
+Spyware secretly watches what you do and steals your information.
+
+ 13. What is the best way to avoid malware?
+
+Avoid unknown downloads, don’t click unsafe links, and use antivirus.
+
+ 14. What is a firewall?
+
+A firewall acts like a security guard that blocks harmful traffic.
+
+ 15. What is a secure password?
+
+A strong password uses letters, numbers, symbols, and is at least 12 characters long.
+
+ 16. Why should I not reuse passwords?
+
+If one account is hacked, all other accounts become easy targets.
+
+ 17. What is a password manager?
+
+A tool that stores and creates strong passwords for you.
+
+ 18. What is MFA (Multi-Factor Authentication)?
+
+A security step that asks for more than just a password, like a code or fingerprint.
+
+ 19. Why is MFA important?
+
+Even if someone knows your password, they still cannot enter your account.
+
+ 20. What should I do if my password is leaked?
+
+Change it immediately and enable MFA.
+
+ 21. Why is public Wi-Fi dangerous?
+
+Hackers on the same network can steal your information.
+
+ 22. How can I safely use public Wi-Fi?
+
+Avoid banking, use a VPN, and never enter passwords on it.
+
+ 23. What is a VPN?
+
+A tool that hides your internet activity and keeps it secure.
+
+ 24. What is encryption?
+
+Encryption scrambles data so only the right person can read it.
+
+ 25. Why is encryption important?
+
+It protects information even if hackers access it.
+
+ 26. What is a data breach?
+
+A data breach happens when unauthorized people get access to private data.
+
+ 27. How can I know if my data was stolen?
+
+You may get alerts from apps, companies, or find your email in breach-check websites.
+
+ 28. What should I do after a data breach?
+
+Change passwords, enable MFA, and monitor accounts.
+
+ 29. What is social engineering?
+
+Tricking people into giving information instead of hacking computers.
+
+ 30. Why is social engineering effective?
+
+People are easier to fool than machines.
+
+ 31. What is shoulder surfing?
+
+When someone watches your screen or keyboard secretly.
+
+ 32. What is tailgating in cybersecurity?
+
+Someone following an employee into a restricted area without permission.
+
+ 33. What is safe browsing?
+
+Avoiding risky websites and not clicking unsafe ads.
+
+ 34. What is HTTPS?
+
+A secure website connection that protects your data.
+
+ 35. Why should I check for HTTPS?
+
+It ensures the website encrypts your information.
+
+ 36. What is two-step verification?
+
+Another word for MFA; it adds extra login security.
+
+ 37. What is identity theft?
+
+When someone uses your personal information to pretend to be you.
+
+ 38. How can I protect my identity?
+
+Use strong passwords, secure privacy settings, and avoid oversharing.
+
+ 39. What is privacy online?
+
+Controlling who sees your personal information.
+
+ 40. Why should I care about privacy?
+
+Hackers can misuse your data to steal money or impersonate you.
+
+ 41. What is GDPR?
+
+A law that protects personal data in Europe.
+
+ 42. Why is GDPR important?
+
+It ensures companies handle your data safely.
+
+ 43. What is ISO 27001?
+
+A standard that helps companies manage information security.
+
+ 44. What is a knowledge base in cybersecurity?
+
+A collection of security topics and answers that a chatbot uses.
+
+ 45. What is a cybersecurity culture?
+
+A workplace where everyone follows safe security practices.
+
+ 46. What is safe data handling?
+
+Using, storing, and sharing data correctly and securely.
+
+ 47. What is data minimization?
+
+Collecting only the information you truly need.
+
+ 48. What is a strong security policy?
+
+Rules that guide how employees protect company data.
+
+ 49. What is secure disposal?
+
+Safely deleting or destroying sensitive data.
+
+ 50. What is BYOD (Bring Your Own Device)?
+
+Using your personal device for work tasks.
+
+ 51. Why can BYOD be risky?
+
+Personal devices may lack security tools.
+
+ 52. What is cloud security?
+
+Protecting data stored in cloud services like Google Drive or OneDrive.
+
+ 53. Are cloud services safe?
+
+Yes, if you use strong passwords and MFA.
+
+ 54. What is Zero Trust?
+
+A security model that does not trust anyone automatically.
+
+ 55. Why is Zero Trust useful?
+
+It reduces the chance of unauthorized access.
+
+ 56. What is incident reporting?
+
+Telling the IT/security team when something suspicious happens.
+
+ 57. Why must incidents be reported quickly?
+
+Faster reporting reduces damage.
+
+ 58. What is log monitoring?
+
+Checking system activity to spot suspicious behavior.
+
+ 59. What is patching?
+
+Updating software to fix security holes.
+
+ 60. Why are updates important?
+
+They close vulnerabilities that hackers can exploit.
+
+ 61. What is brute-force attack?
+
+Trying many password combinations until one works.
+
+ 62. How do I avoid brute-force attacks?
+
+Use long passwords and enable MFA.
+
+ 63. What is a security token?
+
+A device or app that gives verification codes.
+
+ 64. What is a digital footprint?
+
+Everything you leave online—posts, logins, searches.
+
+ 65. Why should I reduce my digital footprint?
+
+To prevent hackers from collecting information about you.
+
+ 66. What is a secure backup?
+
+Storing a copy of data safely in case of loss.
+
+ 67. How often should backups be done?
+
+Regularly—daily or weekly.
+
+ 68. What is two-way authentication?
+
+Another term for MFA where two identity proofs are required.
+
+ 69. What is cybersecurity awareness?
+
+Knowing how to stay safe online.
+
+ 70. Why are employees targeted in attacks?
+
+People make mistakes, which attackers exploit.
+
+ 71. What is safe file sharing?
+
+Using approved apps like OneDrive or Google Drive.
+
+ 72. What is unsafe file sharing?
+
+Using personal email or untrusted apps to send work files.
+
+ 73. What is email spoofing?
+
+When attackers fake someone else’s email address.
+
+ 74. What is DNS?
+
+A system that converts website names into IP addresses.
+
+ 75. What is a DDoS attack?
+
+A flood of traffic that makes a website crash.
+
+ 76. What is authentication?
+
+Checking if a user is who they claim to be.
+
+ 77. What is authorization?
+
+Deciding what a user is allowed to access.
+
+ 78. What is an access control list?
+
+A list that shows who can access what.
+
+ 79. What is an antivirus?
+
+Software that detects and removes malware.
+
+ 80. How does antivirus help?
+
+It blocks and deletes harmful files.
+
+ 81. What is safe downloading?
+
+Downloading only from trusted websites or stores.
+
+ 82. What is unsafe downloading?
+
+Getting files from random websites or pop-ups.
+
+ 83. What is cyber hygiene?
+
+Good daily habits like strong passwords and updates.
+
+ 84. What is a botnet?
+
+A network of infected devices controlled by hackers.
+
+ 85. What is ethical hacking?
+
+Authorized hacking to find and fix security problems.
+
+ 86. What is a vulnerability?
+
+A weakness in a system that hackers can exploit.
+
+ 87. What is penetration testing?
+
+Testing systems for weaknesses through simulated attacks.
+
+ 88. What is secure coding?
+
+Writing software with safety in mind.
+
+ 89. What is encryption key?
+
+A code used to lock and unlock encrypted data.
+
+ 90. Why should keys be protected?
+
+Anyone with the key can access encrypted data.
+
+ 91. What is a cyber risk?
+
+Anything that could cause harm to data or systems.
+
+ 92. What is a security audit?
+
+A review of how well systems are protected.
+
+ 93. What is a threat actor?
+
+A person or group that performs cyberattacks.
+
+ 94. What is MFA fatigue attack?
+
+Hackers spam MFA requests hoping you approve one by mistake.
+
+ 95. What is safe password storage?
+
+Using a password manager instead of notes or screenshots.
+
+ 96. What is a breach notification?
+
+A message sent when a company’s data is stolen.
+
+ 97. What is a phishing simulation?
+
+Fake phishing tests to train employees.
+
+ 98. What is account take-over?
+
+When attackers control your account.
+
+ 99. How do I protect my accounts?
+
+Use strong passwords + MFA and avoid reuse.
+
+ 100. What is the easiest way to stay safe online?
+
+Think before you click, use strong passwords, and keep software updated.

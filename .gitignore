@@ -1,0 +1,118 @@
+# ================================
+#  PYTHON
+# ================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.egg
+*.egg-info/
+*.manifest
+*.spec
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Cython
+cython_debug/
+
+# ================================
+#  PROJECT CONFIG
+# ================================
+# DO NOT COMMIT SECRET CONFIGS
+config.py
+config.json
+config_local.json
+secrets.json
+
+# Environment files
+.env
+.env.*
+*.env
+
+# Ngrok auth & metadata
+.ngrok/
+ngrok.log
+ngrok.yml
+
+# ================================
+#  FASTAPI / LOGS
+# ================================
+logs/
+*.log
+
+# Uvicorn temporary files
+uvicorn.log
+*.pid
+
+# ================================
+#  HUGGING FACE / OLLAMA
+# ================================
+# HF model caches
+~/.cache/huggingface/
+huggingface/
+hf_cache/
+
+# Transformers cache
+~/.cache/torch/
+torch_cache/
+transformers_cache/
+
+# Ollama local models
+~/.ollama/
+ollama/
+
+# ================================
+#  SLACK BOT
+# ================================
+slack_data/
+slack_logs/
+*.slack
+
+# ================================
+# BUILD / PACKAGE FILES
+# ================================
+build/
+dist/
+sdist/
+wheel/
+*.whl
+
+# ================================
+#  NODE (if frontend exists later)
+# ================================
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# ================================
+#  IDE SETTINGS
+# ================================
+.vscode/
+*.code-workspace
+
+.idea/
+*.iml
+
+# ================================
+#  OS FILES
+# ================================
+.DS_Store
+Thumbs.db
+
+# ================================
+#  MISC
+# ================================
+*.bak
+*.tmp
+*.swp
+*.swo
+*.orig
+*.patch
