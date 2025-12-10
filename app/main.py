@@ -3,17 +3,19 @@ import json
 import time
 import hmac
 import hashlib
+import re
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 from .config import Config
 from .llm import llm_echo, test_llm_connection, llm_generate
+from .db import users_collection, questions_collection  # <-- your Mongo collections
 
 # ------------------------------------------------------
 # App setup
 # ------------------------------------------------------
-app = FastAPI(title="SlackBot HF", version="1.1")
+app = FastAPI(title="SlackBot HF", version="1.2")
 
 SLACK_SIGNING_SECRET = Config.slack_signing_secret
 SLACK_BOT_TOKEN = Config.slack_bot_token
@@ -21,8 +23,8 @@ SLACK_BOT_TOKEN = Config.slack_bot_token
 client = WebClient(token=SLACK_BOT_TOKEN)
 
 
-# ------------------------------------------------------ 
-# Verify Slack Request Signature (WITH LOGS)
+# ------------------------------------------------------
+# Helper: verify Slack signature (same as your teammate)
 # ------------------------------------------------------
 def verify_slack(req: Request, raw_body: bytes):
     print("\n🔵 [VERIFY] Incoming Slack Request")
@@ -49,11 +51,11 @@ def verify_slack(req: Request, raw_body: bytes):
 
     basestring = f"v0:{timestamp}:{raw_body.decode()}"
     computed = (
-        "v0=" +
-        hmac.new(
+        "v0="
+        + hmac.new(
             SLACK_SIGNING_SECRET.encode(),
             basestring.encode(),
-            hashlib.sha256
+            hashlib.sha256,
         ).hexdigest()
     )
 
@@ -67,7 +69,281 @@ def verify_slack(req: Request, raw_body: bytes):
 
 
 # ------------------------------------------------------
-# Health check
+# Small helpers for training mode
+# ------------------------------------------------------
+async def get_or_create_user(slack_user_id: str) -> dict:
+    doc = await users_collection.find_one({"slack_user_id": slack_user_id})
+    if doc:
+        return doc
+
+    doc = {
+        "slack_user_id": slack_user_id,
+        "current_level": 1,
+        "in_training": False,
+        "last_question_number": None,
+        "last_question_answer": None,
+        "last_mcq_correct_option": None,
+        "correct_streak": 0,
+        "updated_at": time.time(),
+    }
+    result = await users_collection.insert_one(doc)
+    doc["_id"] = result.inserted_id
+    return doc
+
+
+def extract_mcq_choice(text: str) -> str | None:
+    """
+    Extract A/B/C/D from user text, ignoring case and extra words.
+    """
+    t = text.strip().upper()
+    for letter in ["A", "B", "C", "D"]:
+        if t == letter or t.startswith(letter + " ") or f" {letter} " in t:
+            return letter
+    return None
+
+
+async def send_training_question(user_doc: dict, channel: str):
+    """
+    Pick one question for the user's level and send as multiple choice.
+    """
+    level = user_doc.get("current_level", 1)
+
+    cursor = questions_collection.aggregate(
+        [
+            {"$match": {"level": level}},
+            {"$sample": {"size": 1}},
+        ]
+    )
+
+    question = None
+    async for q in cursor:
+        question = q
+        break
+
+    if not question:
+        client.chat_postMessage(
+            channel=channel,
+            text=f"⚠️ I could not find any questions for level {level}.",
+        )
+        return
+
+    print(f"❓ Selected question from DB: {question}")
+
+    number = question.get("number")
+    q_text = question.get("question_text")
+    answer_text = question.get("answer_text")
+
+    # Ask LLM to build MCQ options
+    mcq_prompt = (
+        "You are a cybersecurity training assistant.\n"
+        "Given the following question and correct short answer, "
+        "create a multiple-choice question with four options A, B, C, and D.\n"
+        "Exactly one option must be correct.\n"
+        "Return ONLY a JSON object with the following fields:\n"
+        "{\n"
+        '  "options": {\n'
+        '    "A": "...",\n'
+        '    "B": "...",\n'
+        '    "C": "...",\n'
+        '    "D": "..."\n'
+        "  },\n"
+        '  "correct_option": "A" | "B" | "C" | "D"\n'
+        "}\n\n"
+        f"Question: {q_text}\n"
+        f"Correct short answer: {answer_text}\n"
+    )
+
+    try:
+        mcq_raw = await llm_generate(mcq_prompt)
+        print("🧾 Raw MCQ LLM output:", mcq_raw)
+
+        # Try to extract JSON object from the LLM output
+        start = mcq_raw.find("{")
+        end = mcq_raw.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("No JSON object found in MCQ output")
+
+        json_str = mcq_raw[start : end + 1]
+        mcq_data = json.loads(json_str)
+
+        options = mcq_data.get("options", {})
+        correct_option = (mcq_data.get("correct_option") or "").upper().strip()
+        if correct_option not in ["A", "B", "C", "D"]:
+            raise ValueError("Invalid or missing correct_option")
+
+    except Exception as e:
+        print("❌ Error generating MCQ:", e)
+        client.chat_postMessage(
+            channel=channel,
+            text=(
+                "⚠️ I had a problem generating multiple-choice options.\n"
+                "Please try `start training` again in a moment."
+            ),
+        )
+        return
+
+
+    # Save state
+    await users_collection.update_one(
+        {"_id": user_doc["_id"]},
+        {
+            "$set": {
+                "in_training": True,
+                "last_question_number": number,
+                "last_question_answer": answer_text,
+                "last_mcq_correct_option": correct_option,
+                "updated_at": time.time(),
+            }
+        },
+    )
+
+    # Build Slack message
+    lines = [
+        f"🎓 *Training mode — Level {user_doc.get('current_level', 1)}*",
+        "",
+        f"*Question #{number}:*",
+        q_text,
+        "",
+        "*Please answer with A, B, C or D:*",
+    ]
+    for letter in ["A", "B", "C", "D"]:
+        if letter in options:
+            lines.append(f"{letter}) {options[letter]}")
+
+    lines.append("")
+    lines.append(
+        "_You can also type `next question` to skip, or `stop training` to exit training mode._"
+    )
+
+    client.chat_postMessage(channel=channel, text="\n".join(lines))
+
+
+async def stop_training(user_doc: dict, channel: str, user: str):
+    if not user_doc.get("in_training"):
+        client.chat_postMessage(
+            channel=channel,
+            text=f"ℹ️ You are not currently in training mode, <@{user}>.",
+        )
+        return
+
+    await users_collection.update_one(
+        {"_id": user_doc["_id"]},
+        {
+            "$set": {
+                "in_training": False,
+                "last_question_number": None,
+                "last_question_answer": None,
+                "last_mcq_correct_option": None,
+                "correct_streak": 0,
+                "updated_at": time.time(),
+            }
+        },
+    )
+
+    client.chat_postMessage(
+        channel=channel,
+        text=(
+            f"🛑 Training mode stopped for <@{user}>.\n"
+            "You can now chat normally. Type `start training` again anytime."
+        ),
+    )
+
+
+async def evaluate_training_answer(
+    user_doc: dict, channel: str, user: str, cleaned_text: str
+):
+    """
+    Evaluate A/B/C/D answer, update level/streak, and send feedback.
+    """
+    if not user_doc.get("in_training"):
+        # Not in training → handled in normal chat
+        return False
+
+    expected_answer = user_doc.get("last_question_answer")
+    question_number = user_doc.get("last_question_number")
+    correct_option = (user_doc.get("last_mcq_correct_option") or "").upper().strip()
+
+    if not correct_option or correct_option not in ["A", "B", "C", "D"]:
+        return False  # no MCQ state, let normal chat handle it
+
+    choice = extract_mcq_choice(cleaned_text)
+    if not choice:
+        client.chat_postMessage(
+            channel=channel,
+            text=(
+                "❓ I could not detect a valid option in your answer.\n"
+                "Please reply with *A, B, C or D*, or type `stop training` to exit."
+            ),
+        )
+        return True  # handled as training
+
+    current_level = user_doc.get("current_level", 1)
+    streak = user_doc.get("correct_streak", 0)
+    level_up_threshold = 3
+
+    if choice == correct_option:
+        streak += 1
+        base_msg = (
+            f"✅ *Your answer for Question #{question_number} is CORRECT!* 🎉\n\n"
+            f"*Correct option:* {correct_option}\n"
+        )
+        if expected_answer:
+            base_msg += f"*Explanation:* {expected_answer}\n"
+
+        level_up_msg = ""
+        if streak >= level_up_threshold:
+            next_level = current_level + 1
+            next_count = await questions_collection.count_documents(
+                {"level": next_level}
+            )
+
+            if next_count > 0:
+                current_level = next_level
+                streak = 0
+                level_up_msg = (
+                    f"\n\n🏆 You have answered {level_up_threshold} "
+                    f"questions correctly in a row.\n"
+                    f"You are now promoted to *Level {current_level}*!"
+                )
+            else:
+                level_up_msg = (
+                    f"\n\nℹ️ You reached the threshold to move to Level {next_level}, "
+                    "but there are no questions configured for that level yet."
+                )
+
+        msg = base_msg + level_up_msg
+
+    else:
+        streak = 0
+        msg = (
+            f"❌ *Your answer for Question #{question_number} is INCORRECT.*\n\n"
+            f"*Correct option:* {correct_option}\n"
+        )
+        if expected_answer:
+            msg += f"*Explanation:* {expected_answer}\n"
+
+    await users_collection.update_one(
+        {"_id": user_doc["_id"]},
+        {
+            "$set": {
+                "current_level": current_level,
+                "correct_streak": streak,
+                "updated_at": time.time(),
+            }
+        },
+    )
+
+    msg += (
+        "\n\n➡️ Type `next question` for another question, "
+        "or `stop training` to exit training mode."
+    )
+
+    client.chat_postMessage(channel=channel, text=msg)
+    return True  # handled as training
+
+
+# ------------------------------------------------------
+# Health check (igual que antes)
 # ------------------------------------------------------
 @app.get("/health")
 def health():
@@ -76,21 +352,16 @@ def health():
 
 
 # ------------------------------------------------------
-# Slack Events Endpoint
+# Slack Events Endpoint (misma estructura que el original)
 # ------------------------------------------------------
-
 @app.post("/slack/events")
 async def slack_events(req: Request, bg: BackgroundTasks):
-    """
-    Main Slack events endpoint.
-
-    Handles:
-    - Slack verification
-    - Training mode
-    - Answer evaluation
-    - Default LLM chat
-    """
     print("\n🟣 [EVENT] Incoming Slack Event")
+
+    # Ignore Slack retries to avoid duplicates
+    if req.headers.get("X-Slack-Retry-Num"):
+        print("🔁 Ignoring Slack retry:", req.headers.get("X-Slack-Retry-Reason"))
+        return {"ok": True}
 
     raw_body = await req.body()
 
@@ -98,334 +369,112 @@ async def slack_events(req: Request, bg: BackgroundTasks):
     try:
         verify_slack(req, raw_body)
     except Exception as e:
-        print(f"❌ Verification error: {e}")
+        print(f"❌ [EVENT] Verification error: {e}")
         raise
 
-    data = json.loads(raw_body.decode() or "{}")
+    print("✅ [EVENT] Slack request verified")
 
-    # Slack URL verification
+    # Parse JSON body
+    data = json.loads(raw_body.decode() or "{}")
+    print(f"📨 Parsed event: {json.dumps(data, indent=2)}")
+
+    # URL verification challenge
     if data.get("type") == "url_verification":
+        print("🔧 Responding to Slack challenge")
         return {"challenge": data["challenge"]}
 
-    # Main event
+    # Actual events
     if data.get("type") == "event_callback":
-        event = data.get("event", {})
-        user = event.get("user")
-        channel = event.get("channel")
-        text = (event.get("text") or "").strip()
+        event = data["event"]
+        print(f"🔄 Processing event: {event}")
+
+        event_type = event.get("type")
+        channel_type = event.get("channel_type")
+
+        print(f"🔍 Event type: {event_type}, channel_type: {channel_type}")
+
+        # Only handle:
+        #  - app_mention in channels
+        #  - direct messages (message in IM)
+        if not (
+            event_type == "app_mention"
+            or (event_type == "message" and channel_type == "im")
+        ):
+            print("🚫 Ignoring event (not app_mention or DM message)")
+            return {"ok": True}
+
 
         # Ignore bot messages
         if "bot_id" in event:
+            print("🤖 Ignored bot message")
             return {"ok": True}
 
-        # Remove mention (if any)
-        if "<@" in text:
-            text = text.split(">", 1)[1].strip()
+        user = event.get("user")
+        channel = event.get("channel")
+        text = event.get("text", "") or ""
 
-        lower_text = text.lower()
+        # Remove mentions like <@U12345> to get the real text
+        cleaned_text = re.sub(r"<@[^>]+>", "", text).strip()
 
-                # ---------------------------------------------------
-        # STOP TRAINING MODE
-        # ---------------------------------------------------
-        if lower_text in ["stop training", "exit training", "quit training", "exit"]:
-            async def stop_training():
-                from .db import users_collection
-                await users_collection.update_one(
-                    {"slack_user_id": user},
-                    {"$set": {"in_training": False}}
-                )
-                client.chat_postMessage(
-                    channel=channel,
-                    text=f"🛑 Training mode stopped for <@{user}>. You can now chat normally."
-                )
-            bg.add_task(stop_training)
-            return {"ok": True}
+        print(f"👤 User: {user}")
+        print(f"💬 Raw Message: '{text}'")
+        print(f"🧹 Cleaned Message: '{cleaned_text}'")
+        print(f"📡 Channel: {channel}")
 
-        # ---------------------------------------------------
-        # TRAINING MODE TRIGGER
-        # ---------------------------------------------------
-        if "start training" in lower_text:
-            async def send_training_question():
-                from .db import users_collection, questions_collection
-                import time, random, json, re
+        async def reply():
+            try:
+                # Load or create trainee document
+                user_doc = await get_or_create_user(user)
+                lower = cleaned_text.lower()
 
-                print("🎓 Entering training mode (MCQ)")
-
-                # ---- Fetch or create user document ----
-                user_doc = await users_collection.find_one({"slack_user_id": user})
-
-                if not user_doc:
-                    user_doc = {
-                        "slack_user_id": user,
-                        "current_level": 1,
-                        "in_training": True,
-                        "last_question_number": None,
-                        "last_question_answer": None,
-                        "last_mcq_correct_option": None,
-                        "correct_streak": 0,
-                        "updated_at": time.time(),
-                    }
-                    await users_collection.insert_one(user_doc)
-                    print(f"👤 Created new trainee document for user {user}")
-                else:
+                # ----- TRAINING COMMANDS -----
+                if "start training" in lower:
+                    print("🎓 User requested START TRAINING")
+                    # Ensure in_training flag and send first question
                     await users_collection.update_one(
                         {"_id": user_doc["_id"]},
-                        {"$set": {"in_training": True, "updated_at": time.time()}},
+                        {
+                            "$set": {
+                                "in_training": True,
+                                "updated_at": time.time(),
+                            }
+                        },
                     )
-                    print(f"👤 Updated trainee document for user {user} (in_training = True)")
-
-                level = user_doc.get("current_level", 1)
-
-                # ---- Pick random question for this level ----
-                query = {"level": level}
-                total = await questions_collection.count_documents(query)
-                print(f"📚 Questions available for level {level}: {total}")
-
-                if total == 0:
-                    msg = (
-                        f"Hi <@{user}>! I could not find any training questions "
-                        f"for level {level} in the database yet."
-                    )
-                    client.chat_postMessage(channel=channel, text=msg)
+                    await send_training_question(user_doc, channel)
                     return
 
-                skip = random.randint(0, total - 1)
-                cursor = questions_collection.find(query).skip(skip).limit(1)
-                docs = await cursor.to_list(length=1)
-
-                if not docs:
-                    msg = (
-                        f"Hi <@{user}>! Something went wrong while fetching "
-                        f"a question for level {level}."
-                    )
-                    client.chat_postMessage(channel=channel, text=msg)
+                if "stop training" in lower:
+                    print("🛑 User requested STOP TRAINING")
+                    await stop_training(user_doc, channel, user)
                     return
 
-                q = docs[0]
-                print(f"❓ Selected question from DB: {q}")
-
-                db_question = q.get("question_text", "")
-                db_answer = q.get("answer_text", "")
-
-                # ---- Ask LLM to turn DB question into MCQ JSON ----
-                mcq_prompt = (
-                    "You are a cybersecurity training assistant.\n"
-                    "You will receive a training item from the database.\n"
-                    "Create ONE multiple-choice question with exactly four options A, B, C, and D.\n"
-                    "Make sure exactly ONE option is clearly correct.\n"
-                    "Respond STRICTLY in this JSON format (no extra text, no markdown, no code fences):\n\n"
-                    "{\n"
-                    "  \"question\": \"...\",\n"
-                    "  \"options\": {\n"
-                    "    \"A\": \"...\",\n"
-                    "    \"B\": \"...\",\n"
-                    "    \"C\": \"...\",\n"
-                    "    \"D\": \"...\"\n"
-                    "  },\n"
-                    "  \"correct_option\": \"A\" | \"B\" | \"C\" | \"D\"\n"
-                    "}\n\n"
-                    "Do NOT add ```json or ``` anywhere.\n\n"
-                    f"Database question: {db_question}\n"
-                    f"Reference answer: {db_answer}\n"
-                )
-
-                mcq_raw = await llm_generate(mcq_prompt)
-                print("🧪 Raw MCQ from LLM:", mcq_raw)
-
-                # ---- Clean and parse JSON ----
-                clean = mcq_raw.strip()
-                clean = re.sub(r"^```[a-zA-Z]*\s*", "", clean)
-                clean = re.sub(r"```$", "", clean)
-
-                start = clean.find("{")
-                end = clean.rfind("}")
-                if start != -1 and end != -1 and end > start:
-                    json_str = clean[start : end + 1]
-                else:
-                    json_str = clean
-
-                print("🧪 MCQ JSON candidate:", json_str)
-
-                try:
-                    mcq = json.loads(json_str)
-                    question_text = mcq.get("question", db_question)
-                    options = mcq.get("options", {})
-                    correct_option = str(mcq.get("correct_option", "")).upper().strip()
-
-                    if correct_option not in ["A", "B", "C", "D"]:
-                        raise ValueError("Invalid correct_option in MCQ JSON")
-
-                except Exception as e:
-                    print("❌ Failed to parse MCQ JSON:", e)
-                    # Fallback: just ask the DB question as open text
-                    fallback_msg = (
-                        f"🎓 *Training mode* — Level {level}\n\n"
-                        f"Question #{q.get('number', '?')}:\n"
-                        f"{db_question}\n\n"
-                        "(MCQ generation failed, using open question.)"
-                    )
-                    client.chat_postMessage(channel=channel, text=fallback_msg)
-                    return
-
-                # ---- Save correct option & DB answer for this user ----
-                await users_collection.update_one(
-                    {"slack_user_id": user},
-                    {
-                        "$set": {
-                            "last_question_number": q.get("number"),
-                            "last_question_answer": db_answer,
-                            "last_mcq_correct_option": correct_option,
-                            "updated_at": time.time(),
-                        }
-                    },
-                )
-
-                # ---- Build Slack message with A–D options ----
-                optA = options.get("A", "")
-                optB = options.get("B", "")
-                optC = options.get("C", "")
-                optD = options.get("D", "")
-
-                message = (
-                    f"🎓 *Training mode* — Level {level}\n\n"
-                    f"Question #{q.get('number', '?')}:\n"
-                    f"{question_text}\n\n"
-                    f"A) {optA}\n"
-                    f"B) {optB}\n"
-                    f"C) {optC}\n"
-                    f"D) {optD}\n\n"
-                    f"Please answer by typing A, B, C or D."
-                )
-
-                print(f"✉️ Sending MCQ to Slack:\n{message}")
-                client.chat_postMessage(channel=channel, text=message)
-
-            bg.add_task(send_training_question)
-            return {"ok": True}
-
-
-        # ---------------------------------------------------
-        #  ANSWER EVALUATION (user responds to question)
-        # ---------------------------------------------------
-        async def evaluate_answer():
-            from .db import users_collection, questions_collection
-            import time
-
-            user_doc = await users_collection.find_one({"slack_user_id": user})
-
-            # Not in training mode → normal chat
-            if not user_doc or not user_doc.get("in_training"):
-                return await default_chat()
-
-            expected_answer = user_doc.get("last_question_answer")
-            question_number = user_doc.get("last_question_number")
-            correct_option = (user_doc.get("last_mcq_correct_option") or "").upper().strip()
-
-            if not correct_option or correct_option not in ["A", "B", "C", "D"]:
-                # We don't have MCQ info → fall back to normal chat or old logic
-                return await default_chat()
-
-            # --- Extract user choice (A/B/C/D) from the text ---
-            user_text = text.strip().upper()
-
-            # Try to get a single letter A–D
-            user_choice = None
-            for letter in ["A", "B", "C", "D"]:
-                if (
-                    user_text == letter
-                    or user_text.startswith(letter + " ")
-                    or f" {letter} " in user_text
-                ):
-                    user_choice = letter
-                    break
-
-            if not user_choice:
-                # User did not provide a clear A/B/C/D
-                client.chat_postMessage(
-                    channel=channel,
-                    text=(
-                        f"❓ I could not detect a valid option in your answer.\n"
-                        f"Please reply with A, B, C or D."
-                    ),
-                )
-                return
-
-            # --- Compare user choice with correct option ---
-            is_correct = (user_choice == correct_option)
-
-            current_level = user_doc.get("current_level", 1)
-            correct_streak = user_doc.get("correct_streak", 0)
-            level_up_threshold = 3  # e.g., 3 correct answers to level up
-            level_up_message = ""
-
-            if is_correct:
-                correct_streak += 1
-                emoji = "✅"
-                base_msg = (
-                    f"{emoji} *Your answer for Question #{question_number} is CORRECT!* 🎉\n\n"
-                    f"*Correct option:* {correct_option}\n"
-                )
-                if expected_answer:
-                    base_msg += f"*Explanation:* {expected_answer}\n"
-                print(f"✅ Correct MCQ answer. New streak: {correct_streak}")
-
-                # Check level up condition
-                if correct_streak >= level_up_threshold:
-                    next_level = current_level + 1
-                    next_level_count = await questions_collection.count_documents(
-                        {"level": next_level}
-                    )
-                    if next_level_count > 0:
-                        current_level = next_level
-                        correct_streak = 0
-                        level_up_message = (
-                            f"\n\n🏆 You have answered {level_up_threshold} questions correctly in a row.\n"
-                            f"You are now promoted to *Level {current_level}*!"
-                        )
+                if "next question" in lower or lower == "next":
+                    print("➡️ User requested NEXT QUESTION")
+                    if user_doc.get("in_training"):
+                        await send_training_question(user_doc, channel)
                     else:
-                        level_up_message = (
-                            f"\n\nℹ️ You reached the threshold to move to Level {next_level}, "
-                            f"but there are no questions configured for that level yet."
+                        client.chat_postMessage(
+                            channel=channel,
+                            text=(
+                                "ℹ️ You are not in training mode. "
+                                "Type `start training` to begin."
+                            ),
                         )
+                    return
 
-            else:
-                emoji = "❌"
-                base_msg = (
-                    f"{emoji} *Your answer for Question #{question_number} is INCORRECT.*\n\n"
-                    f"*Correct option:* {correct_option}\n"
-                )
-                if expected_answer:
-                    base_msg += f"*Explanation:* {expected_answer}\n"
-                print("❌ Incorrect MCQ answer. Streak reset to 0.")
-                correct_streak = 0
+                # ----- TRAINING ANSWERS (A/B/C/D) -----
+                if user_doc.get("in_training"):
+                    handled = await evaluate_training_answer(
+                        user_doc, channel, user, cleaned_text
+                    )
+                    if handled:
+                        return
+                    # if not handled, fall through to normal chat
 
-            # Update user level + streak
-            await users_collection.update_one(
-                {"_id": user_doc["_id"]},
-                {
-                    "$set": {
-                        "current_level": current_level,
-                        "correct_streak": correct_streak,
-                        "updated_at": time.time(),
-                    }
-                },
-            )
-
-            final_msg = base_msg + level_up_message
-            client.chat_postMessage(channel=channel, text=final_msg)
-
-
-        # User typed something → either evaluate or default chat
-        async def default_chat():
-            try:
-                # Echo
-                echo_msg = await llm_echo(text)
-
-                # LLM status ping
+                # ----- NORMAL CHAT (ORIGINAL BEHAVIOUR) -----
+                echo_msg = await llm_echo(cleaned_text)
                 llm_status = await test_llm_connection()
-
-                # Actual LLM answer
-                answer = await llm_generate(text)
+                answer = await llm_generate(cleaned_text)
 
                 final_msg = (
                     f"👋 Hello <@{user}>!\n"
@@ -434,19 +483,15 @@ async def slack_events(req: Request, bg: BackgroundTasks):
                     f"LLM Status: `{llm_status}`"
                 )
 
+                print(f"✉️ Sending Slack reply:\n{final_msg}")
                 client.chat_postMessage(channel=channel, text=final_msg)
 
+            except SlackApiError as e:
+                print("❌ Slack API Error:", e)
+                print("❌ Full error:", e.response)
             except Exception as e:
-                print("❌ Unexpected error in default chat:", e)
-                client.chat_postMessage(
-                    channel=channel,
-                    text="❌ Sorry, something went wrong in normal chat mode."
-                )
+                print("❌ Unexpected error in reply():", e)
 
-
-        # Evaluate or default
-        bg.add_task(evaluate_answer)
-        return {"ok": True}
+        bg.add_task(reply)
 
     return {"ok": True}
-
